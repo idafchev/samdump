@@ -4,6 +4,19 @@ import binascii
 import struct
 from Crypto.Cipher import AES
 
+'''
+References:
+https://github.com/gentilkiwi/mimikatz
+http://www.insecurity.be/blog/2018/01/21/retrieving-ntlm-hashes-and-what-changed-technical-writeup/
+https://microsoft.public.platformsdk.security.narkive.com/EkMyQZrb/maximum-size-of-sid
+https://acad.ro/sectii2002/proceedings/doc2013-3s/05-OPREA.pdf
+http://www.beginningtoseethelight.org/ntsecurity/index.htm
+https://github.com/SecureAuthCorp/impacket/blob/master/examples/secretsdump.py
+enum size
+bool size
+'''
+
+
 # Redacted the registry.py file , key class to add class
 
 class SAM_HASH_AES:
