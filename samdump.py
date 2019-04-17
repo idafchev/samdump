@@ -174,7 +174,10 @@ def get_sam_key(registry, syskey):
 	decrypted_data = decrypt_aes(syskey, account.keys1.salt, account.keys1.data[:account.keys1.data_len])
 	return decrypted_data[:16]
 
-def get_hash(registry):
+def decrypt_des():
+	pass
+
+def get_hash(registry, sk):
 	key = registry.open("SAM\\Domains\\Account\\Users")
 	key_names = registry.open("SAM\\Domains\\Account\\Users\\Names")
 
@@ -184,15 +187,24 @@ def get_hash(registry):
 		acc = USER_ACCOUNT_V(key_user.values()[1].value(),0)
 		l = acc.username.length
 		o = acc.username.offset
-		print acc.data[o:o + l]
+		#print acc.data[o:o + l]
 		l = acc.lm_hash.length
 		o = acc.lm_hash.offset
 		h = SAM_HASH_AES(acc.data[o:o+l],0)
-		print h.data_offset
+		#print "o: ", o
+		#print "l: ", l
+		#print len(h.data)
+		#print h.data_offset
 		l = acc.ntlm_hash.length
                 o = acc.ntlm_hash.offset
                 h = SAM_HASH_AES(acc.data[o:o+l],0)
-		print h.data_offset
+		print "o: ", o
+                print "l: ", l
+		#print h.data_offset
+		#print len(h.data)
+		#sk, h.salt, h.data, l-24
+		m = decrypt_aes(sk, h.salt,  h.data)
+		print m.encode('hex')
 
 print get_computer_name(r_system_hive, get_current_control_set(r_system_hive))
 syskey = get_sys_key(r_system_hive,get_current_control_set(r_system_hive))
@@ -200,4 +212,4 @@ syskey = get_sys_key(r_system_hive,get_current_control_set(r_system_hive))
 print get_sid(r_sam_hive)
 k = get_sam_key(r_sam_hive, syskey)
 
-print get_hash(r_sam_hive)
+print get_hash(r_sam_hive, k)
