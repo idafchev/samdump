@@ -3,6 +3,7 @@ from Registry import Registry
 import binascii
 import struct
 from Crypto.Cipher import AES
+from Crypto.Cipher import DES
 
 '''
 References:
@@ -73,7 +74,7 @@ class SAM_KEY_DATA_AES:
 		self.check_len		= struct.unpack_from(str("<I"), self.buf,8)[0]
 		self.data_len		= struct.unpack_from(str("<I"), self.buf,12)[0]
 		self.salt		= struct.unpack_from(str('<16s'), self.buf,16)[0]
-		self.data		= struct.unpack_from(str('<80s'), self.buf,32)[0]
+		self.data		= struct.unpack_from(str('>80s'), self.buf,32)[0]
 
 class DOMAIN_ACCOUNT_F:
 	def __init__(self, buf):
@@ -106,6 +107,8 @@ class DOMAIN_ACCOUNT_F:
 		self.unk6				= struct.unpack_from(str("<q"), self.buf,344)[0] # mine
 		self.unk7				= struct.unpack_from(str("<q"), self.buf,352)[0] # mine
 		self.unk8				= struct.unpack_from(str("<q"), self.buf,360)[0] # mine
+		print "key1 rev: ", self.keys1.revision
+		print "key2 rev: ", self.keys2.revision
 
 f_system_hive = open("system.hive","rb")
 r_system_hive = Registry.Registry(f_system_hive)
@@ -130,14 +133,15 @@ def get_computer_name(registry, current_control_set):
 def get_sys_key(registry, current_control_set):
 	permut = [11, 6, 7, 1, 8, 10, 14, 0, 3, 5, 2, 15, 13, 9, 12, 4]
 	syskey = []
-	buffer = registry.open(current_control_set + "\\Control\\Lsa\\JD").get_class().decode('hex')
-	buffer += registry.open(current_control_set + "\\Control\\Lsa\\Skew1").get_class().decode('hex')
-	buffer += registry.open(current_control_set + "\\Control\\Lsa\\GBG").get_class().decode('hex')
-	buffer += registry.open(current_control_set + "\\Control\\Lsa\\Data").get_class().decode('hex')
-
+	buffer = registry.open(current_control_set + "\\Control\\Lsa\\JD").get_class().decode('hex')[::-1] # LE/BE endiannes.. [::-1]
+	buffer += registry.open(current_control_set + "\\Control\\Lsa\\Skew1").get_class().decode('hex')[::-1]
+	buffer += registry.open(current_control_set + "\\Control\\Lsa\\GBG").get_class().decode('hex')[::-1]
+	buffer += registry.open(current_control_set + "\\Control\\Lsa\\Data").get_class().decode('hex')[::-1]
+	#print "test: ", str(''.join(buffer))
+	print "syskey before: ", (''.join(buffer)).encode('hex')
 	for i in xrange(16):
 		syskey.append(buffer[permut[i]])
-	return binascii.hexlify(''.join(syskey))
+	return (''.join(syskey))
 
 def get_sid(registry):
 	key = registry.open("SAM\\Domains\\Account")
@@ -171,11 +175,58 @@ def get_sam_key(registry, syskey):
                         data = value.value()
 
 	account = DOMAIN_ACCOUNT_F(data)
+	print "dom rev: ", account.revision
+	print "enc sam key:", account.keys1.data[:account.keys1.data_len].encode('hex')
 	decrypted_data = decrypt_aes(syskey, account.keys1.salt, account.keys1.data[:account.keys1.data_len])
 	return decrypted_data[:16]
 
-def decrypt_des():
-	pass
+# source: http://www.insecurity.be/blog/2018/01/21/retrieving-ntlm-hashes-and-what-changed-technical-writeup/
+def str_to_key(dessrc):
+	bkey = binascii.unhexlify(dessrc)
+	keyarr = []
+	for i in range(0, len(bkey)): keyarr.append(int(binascii.hexlify(bkey[i]),16))
+	bytearr = []
+	bytearr.append(keyarr[0]>>1)
+	bytearr.append(((keyarr[0] & 0x01) << 6) | keyarr[1] >> 2)
+	bytearr.append(((keyarr[1] & 0x03) << 5) | keyarr[2] >> 3)
+	bytearr.append(((keyarr[2] & 0x07) << 4) | keyarr[3] >> 4)
+	bytearr.append(((keyarr[3] & 0x0F) << 3) | keyarr[4] >> 5)
+	bytearr.append(((keyarr[4] & 0x1F) << 2) | keyarr[5] >> 6)
+	bytearr.append(((keyarr[5] & 0x3F) << 1) | keyarr[6] >> 7)
+	bytearr.append(keyarr[6]&0x7F)
+	result = ''
+	for b in bytearr:
+		bit = bin(b*2)[2:].zfill(8)
+		if bit.count('1') %2 == 0:
+			result += hex((b * 2) ^ 1)[2:].zfill(2)
+		else:
+			result += hex(b * 2)[2:].zfill(2)
+	return result
+
+def decrypt_des(buffer, rid):
+	# SystemFunction025(in, key, out) - decrypt 2 des blocks with 32bit key
+	# LM -> isNTLM FALSE. isHistory FALSE -> "LM"
+	# NTLM-> TRUE, FALSE -> "NTLM"
+	# LMHist-> FALSE, TRUE -> "lm"
+	#NTLMHist -> TRUE TRUE -> "ntlm"
+	# rid used as number (DWORD) -> 0xf401 0000 -> [0,1,2,3,0,1,2] des1 = f4010000f40100 ; [3,0,1,2,3,0,1] des2 = 00f4 0100 00f4 01
+	# cypheredHashBuffer.Buffer -> DES ciphered data
+	s_rid = struct.pack("<I",rid)
+	dessrc1 = s_rid + s_rid[:3]
+	dessrc2 = s_rid[3] + s_rid[0] + s_rid[1] + s_rid[2] + s_rid[3] + s_rid[0] + s_rid[1]
+	s_des1 = str_to_key(dessrc1.encode('hex'))
+	s_des2 = str_to_key(dessrc2.encode('hex'))
+	des1 = s_des1.decode('hex')
+	des2 = s_des2.decode('hex')
+	#m1 = buffer[:8], des1
+	#m2 = buffer[8:], des2
+	# m = m1 + m2
+	obj1 = DES.new(des1)
+	m1 = obj1.decrypt(buffer[:8])
+	obj2 = DES.new(des2)
+	m2 = obj2.decrypt(buffer[8:])
+	m = m1+m2
+	print "HASH: ", m.encode('hex')
 
 def get_hash(registry, sk):
 	key = registry.open("SAM\\Domains\\Account\\Users")
@@ -187,10 +238,11 @@ def get_hash(registry, sk):
 		acc = USER_ACCOUNT_V(key_user.values()[1].value(),0)
 		l = acc.username.length
 		o = acc.username.offset
-		#print acc.data[o:o + l]
+		print acc.data[o:o + l]
 		l = acc.lm_hash.length
 		o = acc.lm_hash.offset
 		h = SAM_HASH_AES(acc.data[o:o+l],0)
+		print "aes rev: ", h.revision
 		#print "o: ", o
 		#print "l: ", l
 		#print len(h.data)
@@ -198,18 +250,25 @@ def get_hash(registry, sk):
 		l = acc.ntlm_hash.length
                 o = acc.ntlm_hash.offset
                 h = SAM_HASH_AES(acc.data[o:o+l],0)
+		print "aes rev: ", h.revision
 		print "o: ", o
                 print "l: ", l
 		#print h.data_offset
 		#print len(h.data)
 		#sk, h.salt, h.data, l-24
-		m = decrypt_aes(sk, h.salt,  h.data)
+		m = decrypt_aes(sk, h.salt,  h.data)[:16]
 		print m.encode('hex')
+		rid = user
+		decrypt_des(m,rid)
 
 print get_computer_name(r_system_hive, get_current_control_set(r_system_hive))
 syskey = get_sys_key(r_system_hive,get_current_control_set(r_system_hive))
+print "syskey: ", syskey.encode('hex')
 
 print get_sid(r_sam_hive)
 k = get_sam_key(r_sam_hive, syskey)
+print "samkey: ", k.encode('hex')
 
 print get_hash(r_sam_hive, k)
+print str_to_key("f4010000f40100")
+print str_to_key("00f4010000f401")
