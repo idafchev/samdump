@@ -226,6 +226,7 @@ def decrypt_des(buffer, rid):
 	obj2 = DES.new(des2)
 	m2 = obj2.decrypt(buffer[8:])
 	m = m1+m2
+	print "RID: ", rid
 	print "HASH: ", m.encode('hex')
 
 def get_hash(registry, sk):
@@ -272,3 +273,6 @@ print "samkey: ", k.encode('hex')
 print get_hash(r_sam_hive, k)
 print str_to_key("f4010000f40100")
 print str_to_key("00f4010000f401")
+
+# format:
+# USER:RID:LM:NTLM:::
